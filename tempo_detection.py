@@ -12,6 +12,7 @@ import timeit
 import matplotlib.pyplot as plt
 from collections import deque
 from scipy.interpolate import make_interp_spline
+import sys
 # pip install mediapipe opencv-python
 
 def frame(cap,hand_landmarker) -> tuple[list[list[auto]], float]:
@@ -163,7 +164,7 @@ def main():
     ax.set_xlabel("Sample index")
     ax.set_ylabel("Speed magnitude (units/s)")
     plt.show(block=False)
-    
+    initial_beat=0
     while True:
         pos_counter+=1
         hand_landmarker, timestamp = frame(Cap,hand_landmarker_input)
@@ -177,13 +178,15 @@ def main():
             if(len(speed_buffer) > 2):
                 speed_old,speed_dir_old=xytopolar(speed_buffer[-2][0], speed_buffer[-2][1])
                 speed_new,speed_dir_new=xytopolar(speed_buffer[-1][0], speed_buffer[-1][1])
-                if(abs(speed_dir_new-speed_dir_old) > np.pi/4 and abs(speed_dir_new-speed_dir_old) < 3*np.pi/4 and speed_new * speed_old >0.2):
+                if(abs(speed_dir_new-speed_dir_old) > np.pi/3 and abs(speed_dir_new-speed_dir_old) < 2*np.pi/3 and speed_new * speed_old >0.2):
                     beat_buffer.append(pos_buffer[-1][2]) 
-        initial_bpm=0# detecting the last but two frame of speed. Getting coresponding timeframe
+                    sys.stdout.write('\a')
+                    sys.stdout.flush()
+        # detecting the last but two frame of speed. Getting coresponding timeframe
         if(len(beat_buffer) == 2):
             initial_bpm=60*1e9/(beat_buffer[-1]-beat_buffer[-2])
         if(len(beat_buffer) > 2):
-            initial_bpm=initial_bpm*0.7+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]))*0.3
+            initial_bpm=initial_bpm*0.99+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]))*0.01
             print(f"original bpm: {60*1e9/(beat_buffer[-1]-beat_buffer[-2])}, smoothed bpm: {initial_bpm}")
         if pos_counter % 5 == 0 and len(speed_buffer) > 1:
             # 1. Prepare data
