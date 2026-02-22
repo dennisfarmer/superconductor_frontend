@@ -1,0 +1,8 @@
+palm_opened_closed_detection/hands_dataset/
+palm_opened_closed_detection/hands_dataset.zip
+palm_opened_closed_detection/hands_dataset_processed/
+__pycache__/
+hand_landmarker.task
+
+.venv
+.DS_Store

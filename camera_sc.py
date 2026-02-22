@@ -55,6 +55,18 @@ def main():
         text_mask = np.zeros((height, width, n_channels), dtype="uint8")
 
         for idx in range(len(results.hand_landmarks)):
+            print("===================")
+            print("===================")
+            print("===================")
+            #for coords, hand in zip(results.handedness, results.hand_landmarks):
+                #print(coords)
+                #print("===================")
+                #print(hand)
+                #print("===================")
+                #print("===================")
+            print("===================")
+            print("===================")
+            #exit()
             # Retrieve the wrist coordinate:
             wrist_coordinates = hand_landmarks_list[idx][0]
             wrist_x = wrist_coordinates.x
@@ -102,6 +114,7 @@ def main():
                 vision.drawing_styles.get_default_hand_landmarks_style(),
                 vision.drawing_styles.get_default_hand_connections_style())
 
+        #cv2.rectangle(img,(384,0),(510,128),(0,255,0),3)
 
         img = cv2.flip(img, 1)
         img = cv2.add(img, text_mask)
