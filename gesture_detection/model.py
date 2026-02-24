@@ -3,7 +3,7 @@ from torch import nn, optim
 
 class PalmModel(nn.Module):
     #def __init__(self, input_features=42, num_classes=2):
-    def __init__(self, input_features=84, num_classes=2):
+    def __init__(self, input_features=63*2, num_classes=2):
         super(PalmModel, self).__init__()  # Call superclass constructor
         
         self.fc1 = torch.nn.Linear(input_features, 256)

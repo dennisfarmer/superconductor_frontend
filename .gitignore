@@ -1,6 +1,6 @@
-palm_opened_closed_detection/hands_dataset/
-palm_opened_closed_detection/hands_dataset.zip
-palm_opened_closed_detection/hands_dataset_processed/
+gesture_detection/hands_dataset/
+gesture_detection/hands_dataset.zip
+gesture_detection/hands_dataset_processed/
 __pycache__/
 hand_landmarker.task
 

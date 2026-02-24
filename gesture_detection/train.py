@@ -3,7 +3,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
-from dataloader import get_dataloader
+from custom_dataset import get_dataloader
 
 # CUDA: Nvidia CUDA-enabled GPU
 if torch.cuda.is_available():
@@ -24,21 +24,23 @@ batch_size = 32
 
 train_loader = get_dataloader(
     partition="train",
-    as_landmarks=True,
     batch_size=batch_size,
     shuffle=True
 )
 
 val_loader = get_dataloader(
     partition="val",
-    as_landmarks=True,
     batch_size=batch_size,
     shuffle=False
 )
 
 from model import PalmModel
+
+# Get number of classes from dataset
+#num_classes = len(train_loader.dataset.classes) if hasattr(train_loader.dataset, 'classes') else 2
+num_classes = train_loader.dataset.metadata["label"].nunique()
     
-model = PalmModel(input_features=84, num_classes=2)
+model = PalmModel(input_features=63*2, num_classes=num_classes)
 model.to(device)
 
 # CrossEntropyLoss combines softmax and negative log-likelihood
