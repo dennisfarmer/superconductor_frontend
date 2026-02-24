@@ -9,9 +9,7 @@ from shutil import copy
 from pathlib import Path
 import pandas as pd
 import torch
-from sklearn.model_selection import StratifiedShuffleSplit
-from torch.utils.data import Dataset, DataLoader
-from typing import Union
+import shutil
 
 import time
 import sys
@@ -22,21 +20,29 @@ from collections import defaultdict
 
 
 class CustomDatasetCreator:
-    def __init__(self, src_directory="custom_dataset"):
+    def __init__(self, dataset_name="custom_dataset"):
         self.landmarker = frontend.MediaPipeLandmarker()
         self.gesture_detection = frontend.GestureDetection()
         self.webcam = cv2.VideoCapture(0)
+        self.dataset_name = dataset_name
 
-        self.src_directory = Path(src_directory)
+        self.src_directory = Path(dataset_name)
         self.src_directory.mkdir(parents=True, exist_ok=True)
         
         self.label_map_path = self.src_directory / "label_map.csv"
 
         if not self.label_map_path.exists():
-            default_label_map = {"label": [0, 1, 2], "gesture_name": ["gesture_0", "gesture_1", "gesture_2"]}
-            pd.DataFrame(default_label_map).to_csv(self.label_map_path, index=False)
+            empty_label_map = {"gesture_name": [], "label": []}
+            pd.DataFrame(empty_label_map).to_csv(self.label_map_path, index=False)
 
         label_map = pd.read_csv(self.label_map_path)
+        if not label_map.empty:
+            label_map = label_map[
+                ~label_map["gesture_name"].astype(str).str.match(r"^gesture_\d+$")
+            ]
+            label_map = label_map.reset_index(drop=True)
+            label_map["label"] = range(len(label_map))
+            label_map.to_csv(self.label_map_path, index=False)
         self.label_to_name = dict(zip(label_map["label"].astype(int), label_map["gesture_name"]))
         self.name_to_label = dict(zip(label_map["gesture_name"], label_map["label"].astype(int)))
 
@@ -54,14 +60,17 @@ class CustomDatasetCreator:
         gesture_dir.mkdir(parents=True, exist_ok=True)
         
         # capture every two seconds
-        t = 2
+        t = 0.5
 
         idx = 0
         records = []
 
         
         if gesture_name not in self.name_to_label:
-            label = max(self.name_to_label.values()) + 1
+            if self.name_to_label:
+                label = max(self.name_to_label.values()) + 1
+            else:
+                label = 0
             self.name_to_label[gesture_name] = label
             self.write_label_map()
         else:
@@ -80,6 +89,8 @@ class CustomDatasetCreator:
         
         has_pressed_start = False
         print("press W to start")
+
+        print(f"{self.dataset_name} / {gesture_name}")
         while True:
             ret, webcam_frame = self.webcam.read()
             if not ret:
@@ -97,10 +108,10 @@ class CustomDatasetCreator:
                 has_pressed_start = True
 
             if not has_pressed_start:
-                cv2.imshow("Press 'W' to start", webcam_frame)
+                cv2.imshow(f"Press 'W' to start - {self.dataset_name} / {gesture_name}", webcam_frame)
                 continue
             else:
-                cv2.imshow("Press 'Q' to exit", webcam_frame)
+                cv2.imshow(f"Press 'Q' to exit - {self.dataset_name} / {gesture_name}", webcam_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -108,7 +119,7 @@ class CustomDatasetCreator:
             current_time = time.time()
             if current_time - last_capture_time >= t:
                 
-                if hand_landmarks is not None:
+                if hand_landmarks is not None and len(hand_landmarks) > 0:
                     tensor = self.gesture_detection.mediapipe_to_tensor(handedness, hand_landmarks)
                     
                     tensor_path = gesture_dir / f"{idx}.pt"
@@ -135,14 +146,14 @@ class CustomDatasetCreator:
 
 
 class CustomDatasetProcessor:
-    def __init__(self, src_directory="custom_dataset", train_val_split=0.8) -> None:
+    def __init__(self, dataset_name="custom_dataset", train_val_split=0.8) -> None:
         self.train_val_split = train_val_split
 
         self.train_index = 0
         self.val_index = 0
         self.test_index = 0
 
-        self.src_directory = Path(src_directory)
+        self.src_directory = Path(dataset_name)
         self.label_map_path = self.src_directory / "label_map.csv"
         
         
@@ -155,6 +166,8 @@ class CustomDatasetProcessor:
         self.src_train_val_dir = self.src_directory / "train"
 
         self.tgt_directory = self.src_directory.parent / f"{self.src_directory.name}_processed"
+        if self.tgt_directory.exists():
+            shutil.rmtree(self.tgt_directory)
 
         self.tgt_train = self.tgt_directory / "train"
         self.tgt_train.mkdir(parents=True, exist_ok=True)
@@ -165,7 +178,7 @@ class CustomDatasetProcessor:
         self.dataset = {"index": [], "partition": [], "label": [], "position": []}
 
         self._process_dataset()
-        print('processed dataset!')
+        print(f'processed dataset {dataset_name}!')
 
         df = pd.DataFrame(self.dataset)
         df.to_csv(self.tgt_directory / "gestures.csv", index=False)
@@ -197,103 +210,3 @@ class CustomDatasetProcessor:
                         self._add_record(self.train_index, "train", label, gesture_name)
                         self.train_index += 1
             
-
-class ImageDataset(Dataset):
-    def __init__(
-            self,
-            directory: Union[str, Path],
-            partition: str = "train",
-            indices: list[int] = None,
-        ):
-            self.partition = partition
-            if partition not in ("train", "test", "val"):
-                raise ValueError(f"Invalid partition specified - {partition}")
-            self.directory = Path(directory)
-            self.img_directory = self.directory / partition
-            metadata = pd.read_csv(self.directory / "gestures.csv")
-            #self.num_classes = metadata["label"].nunique()
-            
-            if indices is not None:
-                # Use provided indices (for stratified split)
-                self.metadata = metadata.iloc[indices].reset_index(drop=True)
-            else:
-                # Use partition column
-                self.metadata = metadata[metadata["partition"] == partition]
-                self.metadata.reset_index(drop=True, inplace=True)
-
-    def __len__(self) -> int:
-        return len(self.metadata)
-
-    def __getitem__(self, index) -> tuple[torch.Tensor, int]:
-        row = self.metadata.iloc[index]
-        label = row["label"]
-        tensor_idx = row["index"]
-        tensor_path = str(self.img_directory / f"{tensor_idx}.pt")
-        
-        landmark_tensor = torch.load(tensor_path)
-        
-        if landmark_tensor is None:
-            raise RuntimeError(f"Failed to load image at {tensor_path}. File may be missing or corrupted.")
-
-        return landmark_tensor, label
-
-
-def get_dataloader(
-    dataset_name: str = "custom_dataset",
-    partition: str = "train",
-    batch_size: int = 1,
-    num_workers = 0,
-    shuffle: bool = None,
-    train_val_split: float = 0.8,
-    random_state: int = 42,
-) -> DataLoader:
-    """
-    dataset: "custom_dataset"|"hands_dataset"
-    partition: "train" | "val"
-
-    Performs stratified train/val split based on labels.
-    """
-
-    assert (partition == "train") or (partition == "val")
-
-    directory = f"{dataset_name}_processed"
-    metadata = pd.read_csv(Path(directory) / "gestures.csv")
-    train_val_metadata = metadata[metadata["partition"] != "test"]
-    
-    if len(train_val_metadata) > 0:
-        labels = train_val_metadata["label"].values
-        indices = train_val_metadata.index.values
-        
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=1-train_val_split, random_state=random_state)
-        train_idx, val_idx = next(sss.split(indices, labels))
-        
-        if partition == "train":
-            selected_indices = indices[train_idx]
-        else:
-            selected_indices = indices[val_idx]
-    else:
-        selected_indices = train_val_metadata.index.values
-    
-    dataset = ImageDataset(
-        directory=directory,
-        partition="train",
-        indices=list(selected_indices)
-    )
-
-    loader = DataLoader(
-        dataset = dataset,
-        batch_size=batch_size, 
-        num_workers=num_workers, 
-        shuffle=shuffle
-        )
-        
-    return loader
-
-
-
-if __name__ == "__main__":
-    #data_creator = CustomDatasetCreator()
-    #data_creator(gesture_name = "palm_up")
-    #data_creator(gesture_name = "palm_down")
-
-    processor = CustomDatasetProcessor()

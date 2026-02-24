@@ -12,6 +12,8 @@ import numpy as np
 import torch
 
 import pandas as pd
+from gesture_detection.model import PalmModel
+from gesture_detection.dataloader import get_dataloader
 
 
 class MediaPipeLandmarker:
@@ -132,14 +134,53 @@ class MediaPipeLandmarker:
 
 
 class GestureDetection:
-    def __init__(self, src_directory = "gesture_detection/custom_dataset"):
-        pass
+    def __init__(self, model_name = "palm_up_down"):
+        self.model_name = model_name
+        self.model_initialized = False
+        self.device = None
 
-        self.src_directory = Path("custom_dataset")
-        label_map_path = self.src_directory / "label_map.csv"
+    def initialize_model(self):
+        """
+        `model_name` can be either `"palm_up_down"` or `"palm_hold_release"`
+        """
+
+        self.src_directory = Path("gesture_detection")
+        label_map_path = self.src_directory / self.model_name / "label_map.csv"
         label_map = pd.read_csv(label_map_path)
-        label_to_name = dict(zip(label_map["label"].astype(int), label_map["gesture_name"]))
+        self.label_to_name = dict(zip(label_map["label"].astype(int), label_map["gesture_name"]))
         name_to_label = dict(zip(label_map["gesture_name"], label_map["label"].astype(int)))
+
+        if torch.cuda.is_available():
+            print("Using GPU")
+            self.device = torch.device("cuda")
+
+        # MPS: Apple Silicon
+        elif torch.backends.mps.is_available():
+            print("Using MPS")
+            self.device = torch.device("mps")
+
+        # CPU: 
+        else:
+            print("Using CPU")
+            self.device = torch.device("cpu")
+
+        self.model = PalmModel()
+        self.model.load_state_dict(torch.load(f"gesture_detection/{self.model_name}_model.pth"))
+        self.model.to(self.device)
+        self.model.eval()
+        self.model_initialized = True
+
+    def __call__(self, tensor, isolated_hand="Left"):
+        if not self.model_initialized:
+            return None, None
+
+        tensor = tensor.to(self.device)
+        classification = self.model(tensor)
+        predicted_label = torch.argmax(classification, dim=-1).item()
+        predicted_gesture = self.label_to_name.get(predicted_label, f"Unknown ({predicted_label})")
+        confidence = torch.softmax(classification, dim=-1).max().item() * 100
+
+        return predicted_gesture, confidence
 
     def mediapipe_to_tensor(self, handedness, hand_landmarks, isolated_hand=None):
         """
@@ -243,10 +284,6 @@ class GestureDetection:
             hands_dict[hand_name] = coords
         return hands_dict
 
-    def __call__(self, hands_dict):
-
-        pass
-
 
 
 
@@ -258,12 +295,15 @@ class RecipeInterface:
 
 class Frontend:
     def __init__(self):
+        #self.model_name = "palm_up_down"
+        self.model_name = "palm_hold_release"
         self.landmarker = MediaPipeLandmarker()
         self.webcam = cv2.VideoCapture(0)
-        self.gesture_detection = GestureDetection()
+        self.gesture_detection = GestureDetection(self.model_name)
+        self.gesture_detection.initialize_model()
 
     def start(self):
-        pass
+        self.run_webcam()
 
     def run_webcam(self):
         frame_counter = 0
@@ -277,12 +317,23 @@ class Frontend:
             handedness, hand_landmarks = self.landmarker(webcam_frame)
             overlay_mask = np.zeros((height, width, n_channels), dtype="uint8")
 
-            hand_coords_dict = self.gesture_detection.create_hands_dict(handedness, hand_landmarks)
+            hand_coords_dict = self.gesture_detection.create_hands_dict
+
+            isolated_hand = "Left"
+            hand_tensor = self.gesture_detection.mediapipe_to_tensor(handedness, hand_landmarks, isolated_hand)
+            hand_tensor = self.gesture_detection.expand_one_hand_to_two_hands(hand_tensor, isolated_hand)
+
+            gesture_name, confidence = self.gesture_detection(hand_tensor, isolated_hand)
+
 
             ####################################
             # Drawing onto webcam
 
-            self.landmarker.draw_overlay_hands(webcam_frame, overlay_mask)
+            self.landmarker.draw_overlay_hands(
+                webcam_frame,
+                overlay_mask,
+                text_lr = (f"{gesture_name} ({confidence:.1f}%)", "") if gesture_name is not None else ("no label", "")
+            )
 
             # ...
 
@@ -291,25 +342,11 @@ class Frontend:
             webcam_frame = cv2.flip(webcam_frame, 1)
             webcam_frame = cv2.add(webcam_frame, overlay_mask)
             # draw to screen
-            cv2.imshow("Image", webcam_frame)
+            cv2.imshow("SuperConductor - Webcam View (Mediapipe)", webcam_frame)
 
             ####################################
 
 
-
-            if frame_counter % 25 == 0 and len(hand_landmarks) != 0:
-                output_str = ""
-                # note: output is horizontally flipped, so x=1-x, y=y
-                #       is to keep top left as the origin (0,0)
-                # 
-                #       (1-x)*width, (y)*height is pixel coordinate
-                for hand, coordinate in zip(handedness, hand_landmarks):
-                    output_str += f"{hand[0].category_name}: x={1-coordinate[0].x}, y={coordinate[0].y}, "
-
-                print(f"wrist coordinates: {output_str}")
-                frame_counter = 0
-
-            frame_counter += 1
 
             if key == ord("q"):
                 break
@@ -320,4 +357,4 @@ class Frontend:
 
 if __name__ == "__main__":
     frontend = Frontend()
-    frontend.run_webcam()
+    frontend.start()
