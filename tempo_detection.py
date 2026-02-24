@@ -1,5 +1,4 @@
 from enum import auto
-import timeit
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -175,18 +174,23 @@ def main():
         if len(pos_buffer) > 2:
             speed = ((pos_buffer[-1][0] - pos_buffer[-2][0])/((pos_buffer[-1][2] - pos_buffer[-2][2]) / 1e9), (pos_buffer[-1][1] - pos_buffer[-2][1])/((pos_buffer[-1][2] - pos_buffer[-2][2]) / 1e9))
             speed_buffer.append(speed)
-            if(len(speed_buffer) > 2):
-                speed_old,speed_dir_old=xytopolar(speed_buffer[-2][0], speed_buffer[-2][1])
-                speed_new,speed_dir_new=xytopolar(speed_buffer[-1][0], speed_buffer[-1][1])
-                if(abs(speed_dir_new-speed_dir_old) > np.pi/3 and abs(speed_dir_new-speed_dir_old) < 2*np.pi/3 and speed_new * speed_old >0.2):
-                    beat_buffer.append(pos_buffer[-1][2]) 
-                    sys.stdout.write('\a')
-                    sys.stdout.flush()
+        if len(speed_buffer) >= 4:
+            vx_smooth_old = np.mean([s[0] for s in speed_buffer[-4:-2]])
+            vy_smooth_old = np.mean([s[1] for s in speed_buffer[-4:-2]])
+            vx_smooth_new = np.mean([s[0] for s in speed_buffer[-2:]])
+            vy_smooth_new = np.mean([s[1] for s in speed_buffer[-2:]])
+
+            speed_old, speed_dir_old = xytopolar(vx_smooth_old, vy_smooth_old)
+            speed_new, speed_dir_new = xytopolar(vx_smooth_new, vy_smooth_new)
+            if(abs(speed_dir_new-speed_dir_old) > np.pi/3 and abs(speed_dir_new-speed_dir_old) < 2*np.pi/3 and speed_new * speed_old >0.2):
+                beat_buffer.append(pos_buffer[-1][2]) 
+                sys.stdout.write('\a')
+                sys.stdout.flush()
         # detecting the last but two frame of speed. Getting coresponding timeframe
         if(len(beat_buffer) == 2):
             initial_bpm=60*1e9/(beat_buffer[-1]-beat_buffer[-2])
         if(len(beat_buffer) > 2):
-            initial_bpm=initial_bpm*0.99+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]))*0.01
+            initial_bpm=initial_bpm*0.5+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]))*0.5
             print(f"original bpm: {60*1e9/(beat_buffer[-1]-beat_buffer[-2])}, smoothed bpm: {initial_bpm}")
         if pos_counter % 5 == 0 and len(speed_buffer) > 1:
             # 1. Prepare data
