@@ -92,13 +92,6 @@ class MockBackend:
             self._send_error_response(client_socket, request_id, "Invalid recipe format")
             return
 
-        # Check that values sum to approximately 1
-        total = sum(float(v) for v in recipe.values())
-        if not (0.99 <= total <= 1.01):
-            LOGGER.warning(
-                "Recipe proportions sum to %f, expected ~1.0",
-                total
-            )
 
         # Create a mock MP3 file (minimal valid MP3 structure)
         mp3_data = self._create_mock_mp3(recipe)

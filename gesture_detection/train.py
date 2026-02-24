@@ -164,5 +164,6 @@ def train_model(model_name="palm_up_down", visualize=False):
     print(f"Validation Accuracy: {val_accuracies[-1]*100:.2f}%")
 
 if __name__ == "__main__":
-    train_model(model_name="palm_up_down")
-    train_model(model_name="palm_hold_release")
+    #train_model(model_name="palm_up_down")
+    #train_model(model_name="palm_hold_release")
+    train_model(model_name = "palm_hold_release")
