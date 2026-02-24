@@ -164,6 +164,8 @@ def main():
     ax.set_ylabel("Speed magnitude (units/s)")
     plt.show(block=False)
     initial_beat=0
+    last_beat_time = 0
+    COOLDOWN_NS = 200_000_000 # 200ms debounce
     while True:
         pos_counter+=1
         hand_landmarker, timestamp = frame(Cap,hand_landmarker_input)
@@ -174,24 +176,49 @@ def main():
         if len(pos_buffer) > 2:
             speed = ((pos_buffer[-1][0] - pos_buffer[-2][0])/((pos_buffer[-1][2] - pos_buffer[-2][2]) / 1e9), (pos_buffer[-1][1] - pos_buffer[-2][1])/((pos_buffer[-1][2] - pos_buffer[-2][2]) / 1e9))
             speed_buffer.append(speed)
-        if len(speed_buffer) >= 4:
-            vx_smooth_old = np.mean([s[0] for s in speed_buffer[-4:-2]])
-            vy_smooth_old = np.mean([s[1] for s in speed_buffer[-4:-2]])
-            vx_smooth_new = np.mean([s[0] for s in speed_buffer[-2:]])
-            vy_smooth_new = np.mean([s[1] for s in speed_buffer[-2:]])
+        if len(speed_buffer) >= 5:
+            vx_old = np.mean([speed_buffer[-5][0], speed_buffer[-4][0]])
+            vy_old = np.mean([speed_buffer[-5][1], speed_buffer[-4][1]])
+            
+            vx_ictus = speed_buffer[-3][0]
+            vy_ictus = speed_buffer[-3][1]
+            
+            vx_new = np.mean([speed_buffer[-2][0], speed_buffer[-1][0]])
+            vy_new = np.mean([speed_buffer[-2][1], speed_buffer[-1][1]])
 
-            speed_old, speed_dir_old = xytopolar(vx_smooth_old, vy_smooth_old)
-            speed_new, speed_dir_new = xytopolar(vx_smooth_new, vy_smooth_new)
-            if(abs(speed_dir_new-speed_dir_old) > np.pi/3 and abs(speed_dir_new-speed_dir_old) < 2*np.pi/3 and speed_new * speed_old >0.2):
-                beat_buffer.append(pos_buffer[-1][2]) 
-                sys.stdout.write('\a')
-                sys.stdout.flush()
+            # 2. Calculate speeds (magnitudes)
+            mag_old = np.sqrt(vx_old**2 + vy_old**2)
+            mag_ictus = np.sqrt(vx_ictus**2 + vy_ictus**2)
+            mag_new = np.sqrt(vx_new**2 + vy_new**2)
+
+            # 3. Detect the Speed Dip (Local Minimum)
+            # The ictus speed should be noticeably lower than the speed before and after it.
+            # Multiplying by 0.8 ensures it's a true dip, not just a tiny fluctuation.
+            is_speed_dip = (mag_ictus < mag_old * 0.8) and (mag_ictus < mag_new * 0.8)
+
+            # Prevent division by zero for the angle math
+            if mag_old > 0.001 and mag_new > 0.001:
+                # 4. Detect the Direction Change (Dot Product)
+                dot_product = (vx_old * vx_new) + (vy_old * vy_new)
+                cos_theta = np.clip(dot_product / (mag_old * mag_new), -1.0, 1.0)
+                angle_change = np.arccos(cos_theta)
+
+                current_time = pos_buffer[-3][2] # Get the timestamp of the ictus itself!
+
+                # 5. The Trigger: Sharp angle change + Speed dip + Cooldown
+                # We use np.pi/4 (45 degrees) as it's more forgiving for the fluid motions of conducting
+                if angle_change > np.pi/4 and is_speed_dip:
+                    if current_time - last_beat_time > COOLDOWN_NS:
+                        beat_buffer.append(current_time)
+                        last_beat_time = current_time
+                        sys.stdout.write('\a')
+                        sys.stdout.flush()
         # detecting the last but two frame of speed. Getting coresponding timeframe
         if(len(beat_buffer) == 2):
-            initial_bpm=60*1e9/(beat_buffer[-1]-beat_buffer[-2])
+            initial_bpm=60*1e9/(beat_buffer[-1]-beat_buffer[-2]+1)
         if(len(beat_buffer) > 2):
-            initial_bpm=initial_bpm*0.5+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]))*0.5
-            print(f"original bpm: {60*1e9/(beat_buffer[-1]-beat_buffer[-2])}, smoothed bpm: {initial_bpm}")
+            initial_bpm=initial_bpm*0.5+(60*1e9/(beat_buffer[-1]-beat_buffer[-2]+1))*0.5
+            print(f"original bpm: {60*1e9/(beat_buffer[-1]-beat_buffer[-2]+1)}, smoothed bpm: {initial_bpm}")
         if pos_counter % 5 == 0 and len(speed_buffer) > 1:
             # 1. Prepare data
             x_data = np.arange(len(speed_buffer))
@@ -211,7 +238,10 @@ def main():
             # 3. Dynamic Marker Sizing
             # Use a slightly more stable scaling for visibility
             max_y = np.max(y_data) if np.max(y_data) > 0 else 1
-            sizes = (y_data / max_y) * 200 + 50
+            if(len(beat_buffer) > 0):
+                sizes = [100 if speed_buffer[i] == beat_buffer[-1] else 50 for i in range(len(speed_buffer))]
+            else:
+                sizes = [50 for i in range(len(speed_buffer))]
             scatter.set_sizes(sizes)
 
             # 4. Critical: Update Axis Limits
